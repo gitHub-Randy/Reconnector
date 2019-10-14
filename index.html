@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Axi-Cast V2</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<style>
+  video {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100vh;
+    /* width: auto;
+    height: auto; */
+    z-index: -100;
+  }
+</style>
+<body>
+  <video id="stream" muted="true" controls="false"></video>
+  <img id="errorImage" src="./bluescreen.png" style="visibility: hidden;" />
+  <script>
+    // init / instance vars
+    let streamUrl = "http://10.249.154.18/hls/test.m3u8";
+    this.hls = new Hls();
+    var video = document.getElementById('stream');
+    if (Hls.isSupported()) {
+      //attaches hls stream to the videoTag element
+      hls.attachMedia(video);
+      // MEDIA_ATTACHED event is fired by hls object once MediaSource is ready
+      hls.on(Hls.Events.MEDIA_ATTACHED, function () {
+        hls.loadSource(streamUrl);
+        hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+          video.play();
+        });
+      });
+    }
+    
+    // when an error of streaming occurs( network or media error) this event will execute the Error handler and inserts the "technical problem image in the stream"
+    hls.on(Hls.Events.ERROR, function (event, data) {
+      insertErrorImage();
+      errorHandler(event, data, hls);
+    });
+
+    // error handler for network errors(example: connection loss) or media errors(example: stream is stalling)
+    async function errorHandler(event, data, hls) {
+      var hls = hls;
+      switch (data.type) {
+        case Hls.ErrorTypes.NETWORK_ERROR:
+          console.log("fatal network error encountered, try to recover");
+          // checks if the stream is running if yes it will start to recover and removes the error image
+          // else it will wait 3 seconds and  recurses to the errorHandler function
+          if (await checkStream()) {
+            hls.startLoad();
+            await removeErrorImage();
+          } else {
+            await new Promise(resolve => setTimeout(resolve, 3000)); // 3 sec
+            errorHandler(event, data, hls)
+          }
+          break;
+        case Hls.ErrorTypes.MEDIA_ERROR:
+          console.log("fatal media error encountered, try to recover");
+          // checks if the stream is running if yes it will start to recover and removes the error image
+          // else it will wait 3 seconds and  recurses to the errorHandler function
+          if (await checkStream()) {
+            await removeErrorImage();
+            hls.recoverMediaError();
+          } else {
+            await new Promise(resolve => setTimeout(resolve, 3000)); // 3 sec
+            errorHandler(event, data, hls)
+          }
+          break;
+        default:
+          // TODO: destroy function Needed? 
+          console.log("Could not recover from network or media error!");
+          // this.hls.destroy();
+          break;
+      }
+    }
+
+    // checks if a the stream is running by calling a rest api from the server that will check if ffmpeg is running or not
+    async function checkStream() {
+      let streamStatus = await fetch('http://10.249.154.18:8080/api/process/ffmpeg');
+      let resp = await streamStatus.json();
+      return resp.result;
+    }
+
+    // makes  error Image visible  when called and hides video player
+    function insertErrorImage() {
+      let body = document.body;
+      let errorImage = document.getElementById('errorImage');
+      errorImage.style.visibility = 'visible';
+
+      let vid = document.getElementById('stream');
+      vid.style.visibility = "hidden";
+    }
+
+    // hides error image when called and makes video player visible
+    function removeErrorImage() {
+      let img = document.getElementById('errorImage');
+      let video = document.getElementById('stream');
+      img.style.visibility = "hidden";
+      video.style.visibility = "visible";
+    }
+
+  </script>
+</body>
+
+</html>
