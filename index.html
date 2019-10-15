@@ -20,58 +20,65 @@
     z-index: -100;
   }
 </style>
+
 <body>
   <video id="stream" muted="true" controls="false"></video>
   <img id="errorImage" src="./bluescreen.png" style="visibility: hidden;" />
   <script>
     // init / instance vars
-    let streamUrl = "http://10.249.154.18/hls/test.m3u8";
-    this.hls = new Hls();
-    var video = document.getElementById('stream');
-    if (Hls.isSupported()) {
-      //attaches hls stream to the videoTag element
-      hls.attachMedia(video);
-      // MEDIA_ATTACHED event is fired by hls object once MediaSource is ready
-      hls.on(Hls.Events.MEDIA_ATTACHED, function () {
-        hls.loadSource(streamUrl);
-        hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
-          video.play();
+    this.stream();
+    function stream() {
+      let streamUrl = "http://10.249.154.18/hls/test.m3u8"; // url in .env file zetten vanwege security en minder specificeren
+      this.hls = new Hls();
+      var video = document.getElementById('stream');
+      if (Hls.isSupported()) {
+        //attaches hls stream to the videoTag element
+        hls.attachMedia(video);
+        // MEDIA_ATTACHED event is fired by hls object once MediaSource is ready
+        hls.on(Hls.Events.MEDIA_ATTACHED, function () {
+          hls.loadSource(streamUrl);
+          hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+            removeErrorImage();
+            video.play();
+          });
         });
+      }
+
+      // when an error of streaming occurs( network or media error) this event will execute the Error handler and inserts the "technical problem image in the stream"
+      hls.on(Hls.Events.ERROR, function (event, data) {
+        insertErrorImage();
+        errorHandler(event, data, hls);
       });
+
     }
-    
-    // when an error of streaming occurs( network or media error) this event will execute the Error handler and inserts the "technical problem image in the stream"
-    hls.on(Hls.Events.ERROR, function (event, data) {
-      insertErrorImage();
-      errorHandler(event, data, hls);
-    });
+
 
     // error handler for network errors(example: connection loss) or media errors(example: stream is stalling)
     async function errorHandler(event, data, hls) {
       var hls = hls;
       switch (data.type) {
         case Hls.ErrorTypes.NETWORK_ERROR:
-          console.log("fatal network error encountered, try to recover");
+          console.log(" network error encountered, try to recover");
           // checks if the stream is running if yes it will start to recover and removes the error image
           // else it will wait 3 seconds and  recurses to the errorHandler function
           if (await checkStream()) {
             hls.startLoad();
-            await removeErrorImage();
+             removeErrorImage();
           } else {
-            await new Promise(resolve => setTimeout(resolve, 3000)); // 3 sec
-            errorHandler(event, data, hls)
+            hls.destroy();
+            this.stream();
           }
           break;
         case Hls.ErrorTypes.MEDIA_ERROR:
-          console.log("fatal media error encountered, try to recover");
+          console.log(" media error encountered, try to recover");
           // checks if the stream is running if yes it will start to recover and removes the error image
           // else it will wait 3 seconds and  recurses to the errorHandler function
           if (await checkStream()) {
-            await removeErrorImage();
+             removeErrorImage();
             hls.recoverMediaError();
           } else {
-            await new Promise(resolve => setTimeout(resolve, 3000)); // 3 sec
-            errorHandler(event, data, hls)
+            hls.destroy();
+            stream();
           }
           break;
         default:
@@ -84,10 +91,27 @@
 
     // checks if a the stream is running by calling a rest api from the server that will check if ffmpeg is running or not
     async function checkStream() {
-      let streamStatus = await fetch('http://10.249.154.18:8080/api/process/ffmpeg');
-      let resp = await streamStatus.json();
-      return resp.result;
+      try {
+        let streamStatus = await askServer('http://10.249.154.18:8080/api/process/ffmpeg', 40);
+        let resp = await streamStatus.json();
+        return resp.result;
+      } catch (error) {
+        throw new Error("Something Serious happend with this service ! Contact the stream admin");
+      }
     }
+
+
+    // tries to fetch  'n' times if ffmpeg is running
+    async function askServer(url, n) {
+      try {
+        return await fetch(url)
+      } catch (err) {
+        if (n === 1) return false;
+        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 sec
+        return await askServer(url, n - 1);
+      }
+    }
+
 
     // makes  error Image visible  when called and hides video player
     function insertErrorImage() {
